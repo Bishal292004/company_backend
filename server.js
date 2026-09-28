@@ -11,21 +11,53 @@ const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const allowedOrigins = process.env.FRONTEND_ORIGIN
+    ? process.env.FRONTEND_ORIGIN.split(",").map(origin => origin.trim())
+    : true;
 
 const frontendPath = path.resolve(
     __dirname,
     "../Web-technology-Website/projects/Company/frontend"
 );
 
-app.use(express.static(frontendPath));
+// Middleware
+app.use(cors({ origin: allowedOrigins }));
+app.use(express.json());
 
-app.get("/", (req, res) => {
-    res.sendFile(path.join(frontendPath, "index.html"));
+if (require("fs").existsSync(frontendPath)) {
+    app.use(express.static(frontendPath));
+
+    app.get("/", (req, res) => {
+        res.sendFile(path.join(frontendPath, "index.html"));
+    });
+} else {
+    app.get("/", (req, res) => {
+        res.json({
+            success: true,
+            message: "Company API is running."
+        });
+    });
+}
+
+app.get("/api/health", (req, res) => {
+    res.json({
+        success: true,
+        message: "Company API is healthy."
+    });
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+let databaseConnection;
+
+app.use("/api", async (req, res, next) => {
+    try {
+        databaseConnection ??= connectDB();
+        await databaseConnection;
+        next();
+    } catch (error) {
+        databaseConnection = undefined;
+        next(error);
+    }
+});
 
 // API routes
 app.use("/api/auth", authRoutes);
@@ -50,25 +82,20 @@ app.use((error, req, res, next) => {
     });
 });
 
-async function startServer() {
-    try {
-        if (!process.env.MONGO_URI) {
-            throw new Error("MONGO_URI is missing from .env");
-        }
+if (require.main === module) {
+    if (!process.env.MONGO_URI || !process.env.JWT_SECRET) {
+        throw new Error("MONGO_URI and JWT_SECRET are required.");
+    }
 
-        if (!process.env.JWT_SECRET) {
-            throw new Error("JWT_SECRET is missing from .env");
-        }
-
-        await connectDB();
-
+    databaseConnection = connectDB();
+    databaseConnection.then(() => {
         app.listen(PORT, () => {
             console.log(`Server running on http://localhost:${PORT}`);
         });
-    } catch (error) {
+    }).catch(error => {
         console.error("Server could not start:", error.message);
         process.exit(1);
-    }
+    });
 }
 
-startServer();
+module.exports = app;
